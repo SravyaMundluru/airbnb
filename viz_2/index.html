@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Airbnb NYC – Bubble Chart with Filters</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+    }
+    h2 {
+      color: #ff5a5f;
+    }
+    svg {
+      background: white;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .controls {
+      margin-bottom: 15px;
+    }
+    label {
+      margin-right: 10px;
+      font-weight: bold;
+    }
+    input[type="range"] {
+      width: 200px;
+      margin-right: 20px;
+    }
+    select {
+      margin-right: 20px;
+    }
+    .tooltip {
+      position: absolute;
+      background: white;
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      pointer-events: none;
+      font-size: 12px;
+      visibility: hidden;
+      box-shadow: 0 0 5px rgba(0, 0, 0, 0.15);
+    }
+  </style>
+</head>
+<body>
+  <h2>Airbnb NYC – Price vs Minimum Nights (Bubble = Reviews)</h2>
+
+  <div class="controls">
+    <label for="room-type">Room Type:</label>
+    <select id="room-type"><option value="All">All</option></select>
+
+    <label for="neighborhood">Neighborhood Group:</label>
+    <select id="neighborhood"><option value="All">All</option></select>
+
+    <label>Price ≤ <span id="price-value">5000</span></label>
+    <input type="range" id="price-slider" min="0" max="5000" value="5000" step="50" />
+
+    <label>Min Nights ≤ <span id="nights-value">500</span></label>
+    <input type="range" id="nights-slider" min="1" max="500" value="500" step="10" />
+  </div>
+
+  <svg width="1000" height="600"></svg>
+  <div class="tooltip" id="tooltip"></div>
+
+  <!-- Inside <script> -->
+<script>
+  const svg = d3.select("svg"),
+        margin = { top: 40, right: 160, bottom: 60, left: 80 },
+        width = +svg.attr("width") - margin.left - margin.right,
+        height = +svg.attr("height") - margin.top - margin.bottom,
+        chart = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const tooltip = d3.select("#tooltip");
+  const color = d3.scaleOrdinal(d3.schemeCategory10);
+  let allData = [];
+
+  const x = d3.scaleLinear().range([0, width]).domain([0, 150]);
+  const y = d3.scaleLinear().range([height, 0]).domain([0, 1500]);
+  const r = d3.scaleSqrt().range([2, 20]);
+
+  const roomSelect = d3.select("#room-type");
+  const neighborhoodSelect = d3.select("#neighborhood");
+
+  d3.csv("AB_NYC_2019.csv").then(data => {
+    allData = data.map(d => ({
+      id: d.id,
+      price: +d.price,
+      nights: +d.minimum_nights,
+      reviews: +d.number_of_reviews,
+      room_type: d.room_type,
+      neighborhood: d.neighbourhood_group
+    })).filter(d =>
+      d.price > 0 && d.price <= 1500 &&
+      d.nights > 0 && d.nights <= 150 &&
+      d.reviews >= 0 &&
+      d.room_type && d.neighborhood
+    );
+
+    const roomTypes = Array.from(new Set(allData.map(d => d.room_type))).sort();
+    const neighborhoods = Array.from(new Set(allData.map(d => d.neighborhood))).sort();
+
+    roomTypes.forEach(rt => roomSelect.append("option").text(rt).attr("value", rt));
+    neighborhoods.forEach(n => neighborhoodSelect.append("option").text(n).attr("value", n));
+
+    r.domain([0, d3.max(allData, d => d.reviews)]);
+
+    chart.append("g")
+      .attr("transform", `translate(0,${height})`)
+      .call(d3.axisBottom(x).tickValues(d3.range(0, 151, 25)));
+
+    chart.append("g")
+      .call(d3.axisLeft(y).tickValues(d3.range(0, 1501, 250)));
+
+    updateChart();
+
+    d3.selectAll("#price-slider, #nights-slider, #room-type, #neighborhood")
+      .on("input change", updateChart);
+  });
+
+  function updateChart() {
+    const maxPrice = +d3.select("#price-slider").property("value");
+    const maxNights = +d3.select("#nights-slider").property("value");
+    const selectedRoom = d3.select("#room-type").property("value");
+    const selectedNeighborhood = d3.select("#neighborhood").property("value");
+
+    d3.select("#price-value").text(maxPrice);
+    d3.select("#nights-value").text(maxNights);
+
+    const filtered = allData.filter(d =>
+      d.price <= maxPrice &&
+      d.nights <= maxNights &&
+      (selectedRoom === "All" || d.room_type === selectedRoom) &&
+      (selectedNeighborhood === "All" || d.neighborhood === selectedNeighborhood)
+    );
+
+    const bubbles = chart.selectAll("circle").data(filtered, d => d.id);
+
+    bubbles.enter()
+      .append("circle")
+      .attr("cx", d => x(d.nights))
+      .attr("cy", d => y(d.price))
+      .attr("r", d => r(d.reviews))
+      .attr("fill", d => color(d.room_type))
+      .attr("opacity", 0.7)
+      .on("mouseover", (event, d) => {
+        tooltip.style("visibility", "visible")
+          .html(`<strong>${d.room_type}</strong><br>$${d.price}<br>${d.nights} nights<br>${d.reviews} reviews`);
+      })
+      .on("mousemove", event => {
+        tooltip.style("top", (event.pageY + 10) + "px")
+               .style("left", (event.pageX + 10) + "px");
+      })
+      .on("mouseout", () => tooltip.style("visibility", "hidden"))
+      .merge(bubbles)
+      .transition().duration(300)
+      .attr("cx", d => x(d.nights))
+      .attr("cy", d => y(d.price))
+      .attr("r", d => r(d.reviews));
+
+    bubbles.exit().remove();
+  }
+</script>
+
+</body>
+</html>
