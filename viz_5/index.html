@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Treemap: Room Types within Neighborhoods</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #fff;
+      padding: 20px;
+    }
+    .node {
+      position: absolute;
+      overflow: hidden;
+      border: 1px solid white;
+      font-size: 11px;
+      pointer-events: all;
+    }
+    .tooltip {
+      position: absolute;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 4px;
+      pointer-events: none;
+      display: none;
+    }
+    .legend {
+      margin-top: 10px;
+    }
+    .legend-item {
+      display: inline-block;
+      margin-right: 15px;
+      font-size: 13px;
+    }
+    .legend-color {
+      width: 12px;
+      height: 12px;
+      display: inline-block;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .controls {
+      margin-bottom: 10px;
+    }
+    .controls label {
+      margin-right: 5px;
+    }
+    select {
+      margin-right: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Treemap: Room Types within Neighborhoods</h2>
+
+  <div class="controls">
+    <label for="boroughSelect">Borough:</label>
+    <select id="boroughSelect"><option value="All">All</option></select>
+
+    <label for="neighSelect">Neighborhood:</label>
+    <select id="neighSelect"><option value="All">All</option></select>
+
+    <label for="roomSelect">Room Type:</label>
+    <select id="roomSelect"><option value="All">All</option></select>
+  </div>
+
+  <div id="chart" style="position: relative; width: 960px; height: 600px;"></div>
+  <div class="tooltip" id="tooltip"></div>
+  <div class="legend" id="legend"></div>
+
+  <script>
+    const width = 960;
+    const height = 600;
+
+    const svgContainer = d3.select("#chart")
+      .style("width", width + "px")
+      .style("height", height + "px");
+
+    const tooltip = d3.select("#tooltip");
+    const boroughSelect = d3.select("#boroughSelect");
+    const neighSelect = d3.select("#neighSelect");
+    const roomSelect = d3.select("#roomSelect");
+
+    const colors = d3.scaleOrdinal()
+      .domain(["Entire home/apt", "Private room", "Shared room"])
+      .range(["#4CAF50", "#2196F3", "#FF9800"]);
+
+    const drawLegend = () => {
+      const legend = d3.select("#legend");
+      legend.html(""); // clear before redraw
+      colors.domain().forEach(room => {
+        legend.append("div")
+          .attr("class", "legend-item")
+          .html(`<span class="legend-color" style="background:${colors(room)}"></span>${room}`);
+      });
+    };
+
+    const drawTreemap = (filteredData) => {
+      svgContainer.selectAll(".node").remove();
+
+      const nested = d3.rollups(
+        filteredData,
+        v => v.length,
+        d => d.neighbourhood,
+        d => d.room_type
+      );
+
+      const hierarchyData = {
+        name: "NYC",
+        children: nested.map(([neigh, roomList]) => ({
+          name: neigh,
+          children: roomList.map(([room, count]) => ({
+            name: room,
+            value: count
+          }))
+        }))
+      };
+
+      const root = d3.hierarchy(hierarchyData)
+        .sum(d => d.value)
+        .sort((a, b) => b.value - a.value);
+
+      d3.treemap().size([width, height]).padding(1)(root);
+
+      const nodes = svgContainer.selectAll(".node")
+        .data(root.leaves())
+        .enter()
+        .append("div")
+        .attr("class", "node")
+        .style("left", d => d.x0 + "px")
+        .style("top", d => d.y0 + "px")
+        .style("width", d => (d.x1 - d.x0) + "px")
+        .style("height", d => (d.y1 - d.y0) + "px")
+        .style("background", d => colors(d.data.name))
+        .on("mousemove", (event, d) => {
+          tooltip
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 20) + "px")
+            .style("display", "block")
+            .html(`<strong>${d.parent.data.name}</strong><br>${d.data.name}<br>${d.value} listings`);
+        })
+        .on("mouseout", () => tooltip.style("display", "none"));
+
+      nodes.append("div")
+        .style("padding", "2px")
+        .style("color", "#fff")
+        .style("text-shadow", "1px 1px 2px black")
+        .text(d => d.data.name);
+    };
+
+    d3.csv("AB_NYC_2019.csv").then(data => {
+      data = data.filter(d => d.neighbourhood && d.room_type && d.neighbourhood_group);
+
+      const allBoroughs = Array.from(new Set(data.map(d => d.neighbourhood_group)));
+      const allRooms = Array.from(new Set(data.map(d => d.room_type)));
+
+      allBoroughs.forEach(b => {
+        boroughSelect.append("option").attr("value", b).text(b);
+      });
+
+      allRooms.forEach(r => {
+        roomSelect.append("option").attr("value", r).text(r);
+      });
+
+      const updateNeighborhoods = (borough) => {
+        const neighborhoods = Array.from(new Set(
+          data
+            .filter(d => borough === "All" || d.neighbourhood_group === borough)
+            .map(d => d.neighbourhood)
+        )).sort();
+        neighSelect.html('<option value="All">All</option>');
+        neighborhoods.forEach(n => {
+          neighSelect.append("option").attr("value", n).text(n);
+        });
+      };
+
+      const updateTreemap = () => {
+        const b = boroughSelect.node().value;
+        const n = neighSelect.node().value;
+        const r = roomSelect.node().value;
+
+        const filtered = data.filter(d => {
+          return (b === "All" || d.neighbourhood_group === b) &&
+                 (n === "All" || d.neighbourhood === n) &&
+                 (r === "All" || d.room_type === r);
+        });
+
+        drawTreemap(filtered);
+      };
+
+      // Initial UI setup
+      updateNeighborhoods("All");
+      drawLegend();
+      updateTreemap();
+
+      // Event listeners
+      boroughSelect.on("change", () => {
+        const selectedBorough = boroughSelect.node().value;
+        updateNeighborhoods(selectedBorough);
+        updateTreemap();
+      });
+
+      neighSelect.on("change", updateTreemap);
+      roomSelect.on("change", updateTreemap);
+    });
+  </script>
+</body>
+</html>
