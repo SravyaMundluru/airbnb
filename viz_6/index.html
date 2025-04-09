@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Airbnb NYC Area Chart – Neighbourhood Group Filters</title>
+  <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      padding: 20px;
+    }
+    h2 {
+      color: #ff5a5f;
+      text-align: center;
+    }
+    #controls {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    select {
+      font-size: 16px;
+      padding: 5px 10px;
+      margin: 0 10px;
+    }
+    #chart {
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto 20px auto;
+    }
+    #downloadBtn {
+      display: block;
+      margin: 0 auto;
+      padding: 10px 20px;
+      background: #ff5a5f;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #downloadBtn:hover {
+      background: #e14e52;
+    }
+  </style>
+</head>
+<body>
+  <h2>Airbnb NYC Area Chart – Monthly Reviews</h2>
+  
+  <div id="controls">
+    <label for="groupSelect">Neighbourhood Group:</label>
+    <select id="groupSelect"><option value="All">All Groups</option></select>
+
+    <label for="neighSelect">Neighborhood:</label>
+    <select id="neighSelect"><option value="All">All Neighborhoods</option></select>
+
+    <label for="roomTypeSelect">Room Type:</label>
+    <select id="roomTypeSelect"><option value="All">All Room Types</option></select>
+  </div>
+
+  <div id="chart"></div>
+  <button id="downloadBtn">Download as PNG</button>
+
+  <script>
+    const parseDate = d3.timeParse("%Y-%m-%d");
+    const formatMonth = d3.timeFormat("%Y-%m");
+
+    let fullData;
+
+    d3.csv("AB_NYC_2019.csv").then(data => {
+      fullData = data.filter(d =>
+        d.last_review &&
+        d.room_type &&
+        d.neighbourhood_group &&
+        d.neighbourhood &&
+        d.last_review.slice(0, 7) >= "2015-01"
+      );
+
+      const groups = Array.from(new Set(fullData.map(d => d.neighbourhood_group))).sort();
+      groups.forEach(g => {
+        d3.select("#groupSelect")
+          .append("option")
+          .attr("value", g)
+          .text(g);
+      });
+
+      const roomTypes = Array.from(new Set(fullData.map(d => d.room_type))).sort();
+      roomTypes.forEach(r => {
+        d3.select("#roomTypeSelect")
+          .append("option")
+          .attr("value", r)
+          .text(r);
+      });
+
+      updateNeighborhoods("All");
+      renderChart("All", "All", "All");
+
+      d3.select("#groupSelect").on("change", function () {
+        const group = this.value;
+        updateNeighborhoods(group);
+        renderChart(group, document.getElementById("neighSelect").value, document.getElementById("roomTypeSelect").value);
+      });
+
+      d3.select("#neighSelect").on("change", function () {
+        renderChart(
+          document.getElementById("groupSelect").value,
+          this.value,
+          document.getElementById("roomTypeSelect").value
+        );
+      });
+
+      d3.select("#roomTypeSelect").on("change", function () {
+        renderChart(
+          document.getElementById("groupSelect").value,
+          document.getElementById("neighSelect").value,
+          this.value
+        );
+      });
+
+      document.getElementById("downloadBtn").addEventListener("click", () => {
+        Plotly.downloadImage("chart", {
+          format: "png",
+          filename: "airbnb_reviews_timeseries"
+        });
+      });
+
+      function updateNeighborhoods(selectedGroup) {
+        const neighborhoodSelect = d3.select("#neighSelect");
+        neighborhoodSelect.html('<option value="All">All Neighborhoods</option>');
+
+        const filtered = selectedGroup === "All"
+          ? fullData
+          : fullData.filter(d => d.neighbourhood_group === selectedGroup);
+
+        const neighborhoods = Array.from(new Set(filtered.map(d => d.neighbourhood))).sort();
+        neighborhoods.forEach(n => {
+          neighborhoodSelect.append("option").attr("value", n).text(n);
+        });
+      }
+    });
+
+    function renderChart(selectedGroup, selectedNeighborhood, selectedRoomType) {
+      const filtered = fullData.filter(d =>
+        (selectedGroup === "All" || d.neighbourhood_group === selectedGroup) &&
+        (selectedNeighborhood === "All" || d.neighbourhood === selectedNeighborhood) &&
+        (selectedRoomType === "All" || d.room_type === selectedRoomType)
+      );
+
+      const grouped = d3.rollups(
+        filtered,
+        v => v.length,
+        d => d.room_type,
+        d => formatMonth(parseDate(d.last_review))
+      );
+
+      let traces = [];
+
+      if (selectedRoomType === "All") {
+        traces = grouped.map(([roomType, reviews]) => {
+          const sorted = reviews.sort(([a], [b]) => new Date(a) - new Date(b));
+          const x = sorted.map(d => d[0] + "-01");
+          const y = sorted.map(d => d[1]);
+
+          return {
+            x,
+            y,
+            type: "scatter",
+            mode: "lines",
+            fill: "tozeroy",
+            name: roomType,
+            hoverinfo: "x+y+name"
+          };
+        });
+      } else {
+        const reviews = grouped.find(([rt]) => rt === selectedRoomType);
+        if (reviews) {
+          const sorted = reviews[1].sort(([a], [b]) => new Date(a) - new Date(b));
+          const x = sorted.map(d => d[0] + "-01");
+          const y = sorted.map(d => d[1]);
+
+          traces = [{
+            x,
+            y,
+            type: "scatter",
+            mode: "lines",
+            fill: "tozeroy",
+            name: selectedRoomType,
+            hoverinfo: "x+y+name"
+          }];
+        }
+      }
+
+      const layout = {
+        xaxis: { title: "Month" },
+        yaxis: { title: "Number of Reviews", dtick: 500 },
+        plot_bgcolor: "#fff",
+        paper_bgcolor: "#fff",
+        legend: { title: { text: "Room Type" } },
+        title:
+          (selectedGroup === "All" ? "All Groups" : selectedGroup) +
+          (selectedNeighborhood === "All" ? "" : " – " + selectedNeighborhood) +
+          (selectedRoomType === "All" ? "" : " – " + selectedRoomType)
+      };
+
+      Plotly.newPlot("chart", traces, layout);
+    }
+  </script>
+</body>
+</html>
