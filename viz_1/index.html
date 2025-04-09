@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Airbnb NYC – Animated Radial Bar Chart</title>
+  <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      padding: 30px;
+    }
+    h2 {
+      text-align: center;
+      color: #ff5a5f;
+    }
+    #chart {
+      max-width: 1000px;
+      margin: auto;
+    }
+  </style>
+</head>
+<body>
+  <h2>Animated Radial Bar Chart – Room Type Distribution by Borough Over Time</h2>
+  <div id="chart"></div>
+
+  <script>
+    d3.csv("AB_NYC_2019.csv").then(data => {
+      const parseDate = d3.timeParse("%Y-%m-%d");
+      const formatMonth = d3.timeFormat("%Y-%m");
+
+      const filtered = data.filter(d =>
+        d.last_review && d.neighbourhood_group && d.room_type
+      );
+
+      // Map structure: month → borough → room_type → count
+      const map = new Map();
+
+      filtered.forEach(d => {
+        const date = parseDate(d.last_review);
+        const month = formatMonth(date);
+        const borough = d.neighbourhood_group;
+        const room = d.room_type;
+
+        const key = `${month}::${borough}::${room}`;
+        map.set(key, (map.get(key) || 0) + 1);
+      });
+
+      // Extract unique months, boroughs, and room types
+      const months = Array.from(new Set(filtered.map(d => formatMonth(parseDate(d.last_review))))).sort();
+      const boroughs = Array.from(new Set(filtered.map(d => d.neighbourhood_group))).sort();
+      const roomTypes = Array.from(new Set(filtered.map(d => d.room_type))).sort();
+
+      const baseAngles = boroughs.map((_, i) => (360 / boroughs.length) * i);
+
+      // Generate animation frames
+      const frames = months.map(month => {
+        const traces = roomTypes.map(roomType => {
+          const values = [];
+          const text = [];
+
+          boroughs.forEach((borough, i) => {
+            const total = roomTypes.reduce((sum, r) => {
+              const key = `${month}::${borough}::${r}`;
+              return sum + (map.get(key) || 0);
+            }, 0);
+
+            const key = `${month}::${borough}::${roomType}`;
+            const count = map.get(key) || 0;
+            const percent = total ? (count / total) * 100 : 0;
+
+            values.push(percent);
+            text.push(`${borough}<br>${roomType}: ${percent.toFixed(1)}%`);
+          });
+
+          return {
+            type: "barpolar",
+            r: values,
+            theta: baseAngles,
+            name: roomType,
+            hoverinfo: "text",
+            text: text
+          };
+        });
+
+        return {
+          name: month,
+          data: traces
+        };
+      });
+
+      // Initial (first month) data
+      const initialData = frames[0].data;
+
+      const layout = {
+        polar: {
+          angularaxis: {
+            tickmode: "array",
+            tickvals: baseAngles,
+            ticktext: boroughs,
+            direction: "clockwise",
+            rotation: 90
+          },
+          radialaxis: {
+            ticksuffix: "%",
+            range: [0, 100]
+          }
+        },
+        updatemenus: [{
+          type: "buttons",
+          direction: "right",
+          showactive: false,
+          x: 1.15,           // Push to far right
+          y: -0.4,           // Below slider
+          xanchor: "right",
+          yanchor: "top",
+          pad: { t: 0, r: 10 },
+          buttons: [
+            {
+              label: "Play",
+              method: "animate",
+              args: [null, {
+                fromcurrent: true,
+                frame: { duration: 700, redraw: true },
+                transition: { duration: 300 }
+              }]
+            },
+            {
+              label: "Pause",
+              method: "animate",
+              args: [[null], {
+                mode: "immediate",
+                transition: { duration: 0 },
+                frame: { duration: 0, redraw: false }
+              }]
+            }
+          ]
+        }],
+        sliders: [{
+          pad: { t: 30 },
+          x: 0.1,
+          len: 0.8,
+          currentvalue: {
+            visible: true,
+            prefix: "Month: ",
+            font: { size: 14, color: "#333" }
+          },
+          steps: frames.map(f => ({
+            label: f.name,
+            method: "animate",
+            args: [[f.name], {
+              mode: "immediate",
+              transition: { duration: 200 },
+              frame: { duration: 500, redraw: true }
+            }]
+          }))
+        }],
+        legend: { title: { text: "Room Type" } },
+        margin: { t: 50, b: 160, l: 80, r: 100 }
+      };
+
+      Plotly.newPlot("chart", initialData, layout).then(() => {
+        Plotly.addFrames("chart", frames);
+      });
+    });
+  </script>
+</body>
+</html>
