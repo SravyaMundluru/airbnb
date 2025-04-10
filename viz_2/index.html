@@ -62,13 +62,12 @@
     <input type="range" id="nights-slider" min="1" max="500" value="500" step="10" />
   </div>
 
-  <svg width="1000" height="600"></svg>
+  <svg width="1100" height="600"></svg>
   <div class="tooltip" id="tooltip"></div>
 
-  <!-- Inside <script> -->
 <script>
   const svg = d3.select("svg"),
-        margin = { top: 40, right: 160, bottom: 60, left: 80 },
+        margin = { top: 40, right: 220, bottom: 60, left: 80 },
         width = +svg.attr("width") - margin.left - margin.right,
         height = +svg.attr("height") - margin.top - margin.bottom,
         chart = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
@@ -118,6 +117,27 @@
 
     d3.selectAll("#price-slider, #nights-slider, #room-type, #neighborhood")
       .on("input change", updateChart);
+
+    // ✅ Add legend
+    const legend = svg.append("g")
+      .attr("transform", `translate(${width + margin.left + 20}, ${margin.top})`);
+
+    roomTypes.forEach((roomType, i) => {
+      const legendRow = legend.append("g")
+        .attr("transform", `translate(0, ${i * 25})`);
+
+      legendRow.append("rect")
+        .attr("width", 15)
+        .attr("height", 15)
+        .attr("fill", color(roomType));
+
+      legendRow.append("text")
+        .attr("x", 20)
+        .attr("y", 12)
+        .text(roomType)
+        .style("font-size", "12px")
+        .attr("alignment-baseline", "middle");
+    });
   });
 
   function updateChart() {
